@@ -139,7 +139,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
         if (!mounted) return;
         await showDialog(
           context: context,
-          barrierDismissible: true,
+          barrierDismissible: false, // ← change true en false
           barrierColor: Colors.black.withValues(alpha: 0.8),
           builder: (_) => BadgeUnlockOverlay(
             badge: badge,
