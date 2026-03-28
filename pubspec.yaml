@@ -1,0 +1,95 @@
+name: Movesense
+description: "Votre coach fitness intelligent – application podomètre avancée"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Base de données locale
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.5
+
+  # Capteurs
+  sensors_plus: ^6.1.0
+  pedometer: ^4.0.1
+
+  # GPS & Cartes
+  geolocator: ^13.0.2
+  latlong2: ^0.9.1
+  flutter_map: ^7.0.2
+
+  # Graphiques
+  fl_chart: ^0.70.2
+
+  # Audio
+  audioplayers: ^6.4.0
+  flutter_tts: ^4.2.2
+
+  # Notifications
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+
+  # Animations
+  lottie: ^3.3.1
+  animated_text_kit: ^4.2.3
+
+  # PDF & Export
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  share_plus: ^10.1.4
+
+  # Fichiers
+  file_picker: ^8.1.7
+
+  # UI Utilities
+  cupertino_icons: ^1.0.8
+  percent_indicator: ^4.2.4
+  smooth_page_indicator: ^1.2.0+3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.4.0
+  hive_generator: ^2.0.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/movesense_logo.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#1A3A5C"
+  adaptive_icon_foreground: "assets/images/movesense_logo.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/animations/
+    - assets/sounds/
+    - assets/data/
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
