@@ -208,9 +208,15 @@ class AudioService {
 
   Future<void> playMusic() async {
     if (_state.playlist.isEmpty) return;
-    final path = _state.currentMusicPath ?? _state.playlist.first;
-    await _musicPlayer.play(DeviceFileSource(path));
-    _state = _state.copyWith(isPlaying: true, currentMusicPath: path);
+    try {
+      final path = _state.currentMusicPath ?? _state.playlist.first;
+      await _musicPlayer.stop();
+      await _musicPlayer.play(DeviceFileSource(path));
+      _state = _state.copyWith(isPlaying: true, currentMusicPath: path);
+      await _saveSettings();
+    } catch (e) {
+      _state = _state.copyWith(isPlaying: false);
+    }
   }
 
   Future<void> pauseMusic() async {
@@ -224,9 +230,11 @@ class AudioService {
   }
 
   Future<void> stopMusic() async {
-    await _musicPlayer.stop();
+    try {
+      await _musicPlayer.stop();
+    } catch (_) {}
     _state = _state.copyWith(isPlaying: false);
-    _bpmSyncTimer?.cancel();
+    await _saveSettings();
   }
 
   Future<void> _playNextTrack() async {
@@ -302,7 +310,11 @@ class AudioService {
 
   Future<void> clearPlaylist() async {
     await stopMusic();
-    _state = _state.copyWith(playlist: [], currentMusicPath: null);
+    _state = _state.copyWith(
+      playlist: [],
+      currentMusicPath: null,
+      isPlaying: false,
+    );
     await _saveSettings();
   }
 

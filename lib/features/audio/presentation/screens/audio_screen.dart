@@ -383,25 +383,34 @@ class _AudioScreenState extends State<AudioScreen>
                   color: AppColors.activeBlue,
                   onTap: () async {
                     await _audioService.pickMusicFiles();
-                    setState(() {});
+                    if (mounted) setState(() {});
                   },
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _actionButton(
-                  icon: s.isPlaying
+                  icon: _audioService.state.isPlaying
                       ? Icons.pause_rounded
                       : Icons.play_arrow_rounded,
-                  label: s.isPlaying ? 'Pause' : 'Jouer',
+                  label: _audioService.state.isPlaying ? 'Pause' : 'Jouer',
                   color: AppColors.successGreen,
                   onTap: () async {
-                    if (s.isPlaying) {
+                    if (_audioService.state.isPlaying) {
                       await _audioService.pauseMusic();
                     } else {
+                      if (_audioService.state.playlist.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Ajoutez d\'abord une musique'),
+                            backgroundColor: AppColors.alertRed,
+                          ),
+                        );
+                        return;
+                      }
                       await _audioService.playMusic();
                     }
-                    setState(() {});
+                    if (mounted) setState(() {});
                   },
                 ),
               ),
@@ -413,7 +422,7 @@ class _AudioScreenState extends State<AudioScreen>
                   color: AppColors.alertRed,
                   onTap: () async {
                     await _audioService.clearPlaylist();
-                    setState(() {});
+                    if (mounted) setState(() {});
                   },
                 ),
               ),

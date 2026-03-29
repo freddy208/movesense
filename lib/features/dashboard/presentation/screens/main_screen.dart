@@ -13,6 +13,7 @@ import '../../../../core/utils/app_router.dart';
 import '../../../gamification/data/datasources/badge_service.dart';
 import '../../../gamification/presentation/screens/badges_screen.dart';
 import '../../../../core/utils/app_state_provider.dart';
+import '../../../audio/data/datasources/audio_service.dart';
 
 // ═══════════════════════════════════════
 // TRANSITIONS FLUIDES
@@ -123,9 +124,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   Widget build(BuildContext context) {
     // Écoute fin de session → affiche badges débloqués
-      ref.listen(sessionRefreshProvider, (prev, next) async {
+    ref.listen(sessionRefreshProvider, (prev, next) async {
       if (prev == null || next <= prev) return;
       await Future.delayed(const Duration(milliseconds: 500));
+
       final badgeService = BadgeService();
       final badges = await badgeService.loadBadges();
       final now = DateTime.now();
@@ -137,13 +139,17 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
       for (final badge in recentBadges) {
         if (!mounted) return;
-        await showDialog(
-          context: context,
-          barrierDismissible: false, // ← change true en false
-          barrierColor: Colors.black.withValues(alpha: 0.8),
-          builder: (_) => BadgeUnlockOverlay(
-            badge: badge,
-            onDismiss: () => Navigator.pop(context),
+        // Son du badge
+        await AudioService().playSound(AppSound.badge);
+        // Overlay plein écran sans Scaffold
+        await Navigator.of(context).push(
+          PageRouteBuilder(
+            opaque: false,
+            barrierColor: Colors.black.withValues(alpha: 0.8),
+            pageBuilder: (_, __, ___) => BadgeUnlockOverlay(
+              badge: badge,
+              onDismiss: () => Navigator.of(context).pop(),
+            ),
           ),
         );
         await Future.delayed(const Duration(milliseconds: 300));
