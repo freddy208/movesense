@@ -642,6 +642,7 @@ class _BadgeDetailSheet extends StatelessWidget {
 // ═══════════════════════════════════════
 // OVERLAY BADGE DÉBLOQUÉ (animation Lottie)
 // ═══════════════════════════════════════
+
 class BadgeUnlockOverlay extends StatefulWidget {
   final Badge badge;
   final VoidCallback onDismiss;
@@ -667,12 +668,15 @@ class _BadgeUnlockOverlayState extends State<BadgeUnlockOverlay>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 700),
     );
-    _scale = Tween<double>(begin: 0.5, end: 1.0).animate(
+    _scale = Tween<double>(begin: 0.4, end: 1.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
     );
-    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
+    _fade = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeIn,
+    );
     _controller.forward();
     Future.delayed(const Duration(seconds: 3), widget.onDismiss);
   }
@@ -685,98 +689,113 @@ class _BadgeUnlockOverlayState extends State<BadgeUnlockOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _fade,
-      child: Container(
-        color: Colors.black.withValues(alpha: 0.7),
-        child: Center(
-          child: ScaleTransition(
-            scale: _scale,
-            child: Container(
-              margin: const EdgeInsets.all(32),
-              padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A2A3A),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: widget.badge.color.withValues(alpha: 0.5),
-                  width: 2,
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: GestureDetector(
+        onTap: widget.onDismiss,
+        child: FadeTransition(
+          opacity: _fade,
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.85),
+            width: double.infinity,
+            height: double.infinity,
+            child: Center(
+              child: ScaleTransition(
+                scale: _scale,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 40),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 28,
+                    vertical: 32,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2A3A),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: widget.badge.color.withValues(alpha: 0.6),
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: widget.badge.color.withValues(alpha: 0.35),
+                        blurRadius: 40,
+                        spreadRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Animation Lottie
+                      SizedBox(
+                        height: 130,
+                        child: Lottie.asset(
+                          'assets/animations/badge_unlock.json',
+                          repeat: false,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Emoji badge
+                      Text(
+                        widget.badge.emoji,
+                        style: const TextStyle(fontSize: 56),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Nom du badge
+                      Text(
+                        widget.badge.name,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: widget.badge.color,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // XP gagné
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.energyOrange
+                              .withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: AppColors.energyOrange
+                                .withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Text(
+                          '+${widget.badge.xpReward} XP',
+                          style: const TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.energyOrange,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Tap pour fermer
+                      Text(
+                        'Appuyer pour continuer',
+                        style: TextStyle(
+                          fontFamily: 'Roboto',
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.3),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: widget.badge.color.withValues(alpha: 0.3),
-                    blurRadius: 30,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Animation Lottie
-                  SizedBox(
-                    height: 120,
-                    child: Lottie.asset(
-                      'assets/animations/badge_unlock.json',
-                      repeat: false,
-                    ),
-                  ),
-                  const Text(
-                    '🎉 Badge Débloqué !',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    widget.badge.emoji,
-                    style: const TextStyle(fontSize: 48),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    widget.badge.name,
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: widget.badge.color,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.badge.description,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'Roboto',
-                      fontSize: 13,
-                      color: Colors.white.withValues(alpha: 0.6),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.energyOrange.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.energyOrange.withValues(alpha: 0.4),
-                      ),
-                    ),
-                    child: Text(
-                      '+${widget.badge.xpReward} XP',
-                      style: const TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.energyOrange,
-                      ),
-                    ),
-                  ),
-                ],
               ),
             ),
           ),

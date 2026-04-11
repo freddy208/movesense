@@ -878,15 +878,22 @@ void _showGoalPicker({
             ),
             Switch(
               value: _reminderEnabled,
-              onChanged: (v) {
+              onChanged: (v) async {
                 setState(() => _reminderEnabled = v);
                 HapticFeedback.selectionClick();
+                // Sauvegarde immédiate
+                if (v) {
+                  await NotificationService.scheduleDailyReminder(
+                    hour: _reminderHour,
+                    minute: _reminderMinute,
+                  );
+                } else {
+                  await NotificationService.cancelAll();
+                }
               },
               activeThumbColor: AppColors.energyOrange,
-              inactiveThumbColor:
-                  Colors.white.withValues(alpha: 0.3),
-              inactiveTrackColor:
-                  Colors.white.withValues(alpha: 0.1),
+              inactiveThumbColor: Colors.white.withValues(alpha: 0.3),
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
             ),
           ],
         ),

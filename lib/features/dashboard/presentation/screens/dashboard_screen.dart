@@ -45,7 +45,252 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   String get _todayQuote {
     final dayIndex = DateTime.now().day % _motivationalQuotes.length;
     return _motivationalQuotes[dayIndex];
+  } 
+  // Add new method
+  void _showQuickGoalEditor() {
+    HapticFeedback.lightImpact();
+    int tempGoal = _dailyGoal;
+    final TextEditingController controller =
+        TextEditingController(text: _dailyGoal.toString());
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: StatefulBuilder(
+          builder: (ctx, setModal) => Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Color(0xFF1A2A3A),
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Objectif quotidien',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  '$tempGoal pas',
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.energyOrange,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Slider
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: AppColors.energyOrange,
+                    inactiveTrackColor:
+                        Colors.white.withValues(alpha: 0.1),
+                    thumbColor: Colors.white,
+                    trackHeight: 6,
+                  ),
+                  child: Slider(
+                    value: tempGoal.toDouble().clamp(1, 30000),
+                    min: 1,
+                    max: 30000,
+                    divisions: 599,
+                    onChanged: (v) {
+                      setModal(() {
+                        tempGoal = v.round();
+                        controller.text = tempGoal.toString();
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Champ manuel
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          color: Colors.white,
+                          fontSize: 16,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'Saisir manuellement',
+                          labelStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.4)),
+                          suffixText: 'pas',
+                          suffixStyle: const TextStyle(
+                              color: AppColors.energyOrange,
+                              fontWeight: FontWeight.w700),
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.06),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.1)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.1)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                                color: AppColors.energyOrange, width: 2),
+                          ),
+                        ),
+                        onChanged: (v) {
+                          final parsed = int.tryParse(v);
+                          if (parsed != null && parsed >= 1 && parsed <= 30000) {
+                            setModal(() => tempGoal = parsed);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () {
+                        final parsed = int.tryParse(controller.text);
+                        if (parsed != null) {
+                          setModal(() => tempGoal = parsed.clamp(1, 30000));
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.activeBlue,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.check_rounded,
+                            color: Colors.white, size: 22),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Presets rapides
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [1, 5000, 8000, 10000, 15000].map((steps) {
+                    final isSelected = tempGoal == steps;
+                    return GestureDetector(
+                      onTap: () {
+                        setModal(() {
+                          tempGoal = steps;
+                          controller.text = steps.toString();
+                        });
+                        HapticFeedback.selectionClick();
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppColors.energyOrange
+                              : Colors.white.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isSelected
+                                ? AppColors.energyOrange
+                                : Colors.white.withValues(alpha: 0.1),
+                          ),
+                        ),
+                        child: Text(
+                          steps == 1
+                              ? 'Test'
+                              : steps >= 1000
+                                  ? '${steps ~/ 1000}k'
+                                  : '$steps',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isSelected
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      // Sauvegarde immédiate dans Hive
+                      final box = Hive.box(AppConstants.userProfileBox);
+                      await box.put(AppConstants.dailyStepGoalKey, tempGoal);
+                      if (mounted) {
+                        setState(() => _dailyGoal = tempGoal);
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '✅ Objectif mis à jour : $tempGoal pas',
+                              style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            backgroundColor: AppColors.successGreen,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            margin: const EdgeInsets.all(16),
+                          ),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.energyOrange,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: const Text(
+                      'Sauvegarder',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
+
+  // Add new method
 
   @override
   void initState() {
@@ -339,30 +584,55 @@ void _toggleSession() {
                   color: Colors.white,
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: percent >= 100
-                      ? AppColors.successGreen.withValues(alpha: 0.2)
-                      : AppColors.energyOrange.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: percent >= 100
-                        ? AppColors.successGreen.withValues(alpha: 0.4)
-                        : AppColors.energyOrange.withValues(alpha: 0.3),
+              Row(
+                children: [
+                  // Badge pourcentage
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: percent >= 100
+                          ? AppColors.successGreen.withValues(alpha: 0.2)
+                          : AppColors.energyOrange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: percent >= 100
+                            ? AppColors.successGreen.withValues(alpha: 0.4)
+                            : AppColors.energyOrange.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      percent >= 100 ? '✅ Atteint !' : '$percent%',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: percent >= 100
+                            ? AppColors.successGreen
+                            : AppColors.energyOrange,
+                      ),
+                    ),
                   ),
-                ),
-                child: Text(
-                  percent >= 100 ? '✅ Atteint !' : '$percent%',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: percent >= 100
-                        ? AppColors.successGreen
-                        : AppColors.energyOrange,
+                  const SizedBox(width: 8),
+                  // Bouton réinitialisation rapide
+                  GestureDetector(
+                    onTap: _showQuickGoalEditor,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.15),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.tune_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
           ),

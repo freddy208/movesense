@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+import 'package:pedometer/pedometer.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../audio/data/datasources/audio_service.dart';
 import '../../../audio/data/datasources/notification_service.dart';
@@ -62,65 +62,11 @@ class LiveSessionData {
 }
 
 // ═══════════════════════════════════════
-// PEAK DETECTION — VERSION OPTIMISÉE
-// ═══════════════════════════════════════
-class PeakDetector {
-  static const double _threshold = 10.5;
-  static const int _minStepIntervalMs = 250;
-  static const int _smoothingWindow = 5;
-
-  final List<double> _magnitudeBuffer = [];
-  DateTime _lastStepTime =
-      DateTime.now().subtract(const Duration(seconds: 2));
-  double _lastMagnitude = 0.0;
-  bool _isPeak = false;
-
-  bool processAccelerometer(AccelerometerEvent event) {
-    final magnitude = sqrt(
-      event.x * event.x + event.y * event.y + event.z * event.z,
-    );
-
-    _magnitudeBuffer.add(magnitude);
-    if (_magnitudeBuffer.length > _smoothingWindow) {
-      _magnitudeBuffer.removeAt(0);
-    }
-    final smoothed = _magnitudeBuffer.reduce((a, b) => a + b) /
-        _magnitudeBuffer.length;
-
-    bool stepDetected = false;
-
-    if (!_isPeak && smoothed > _threshold && smoothed > _lastMagnitude) {
-      _isPeak = true;
-    } else if (_isPeak && smoothed < _threshold) {
-      _isPeak = false;
-      final now = DateTime.now();
-      final elapsed = now.difference(_lastStepTime).inMilliseconds;
-      if (elapsed >= _minStepIntervalMs) {
-        _lastStepTime = now;
-        stepDetected = true;
-      }
-    }
-
-    _lastMagnitude = smoothed;
-    return stepDetected;
-  }
-
-  void reset() {
-    _magnitudeBuffer.clear();
-    _lastStepTime =
-        DateTime.now().subtract(const Duration(seconds: 2));
-    _lastMagnitude = 0.0;
-    _isPeak = false;
-  }
-}
-
-// ═══════════════════════════════════════
-// PEDOMETER SERVICE — OPTIMISÉ BATTERIE
+// PEDOMETER SERVICE — CAPTEUR NATIF
 // ═══════════════════════════════════════
 class PedometerService {
-  final PeakDetector _peakDetector = PeakDetector();
-
-  StreamSubscription<AccelerometerEvent>? _accelSubscription;
+  StreamSubscription<StepCount>? _stepSubscription;
+  StreamSubscription<PedestrianStatus>? _statusSubscription;
   Timer? _timerSubscription;
 
   final _sessionController =
@@ -128,21 +74,25 @@ class PedometerService {
   Stream<LiveSessionData> get sessionStream => _sessionController.stream;
 
   LiveSessionData _currentData = const LiveSessionData();
+  LiveSessionData get currentData => _currentData;
 
-  // Profil
+  // Pas de référence au démarrage de la session
+  int _stepsAtSessionStart = 0;
+  bool _firstStepReceived = false;
+
+  // Profil utilisateur
   double _weight = 70.0;
   double _strideLength = 0.75;
   int _dailyGoal = 10000;
 
-  // Inactivité (auto-pause)
+  // Auto-pause
   int _secondsSinceLastStep = 0;
   static const int _autoPauseSeconds = 120;
 
-  // Anti-double step
-  int _lastStepCount = 0;
-
-  // Objectif atteint notifié
+  // Objectif notifié
   bool _goalNotified = false;
+
+  // Statut marche/arrêt
 
   void _loadProfile() {
     final box = Hive.box(AppConstants.userProfileBox);
@@ -157,13 +107,38 @@ class PedometerService {
     );
   }
 
-  void startSession() {
+  // ── DEMANDE PERMISSION ──
+  static Future<bool> requestPermission() async {
+    final status = await Permission.activityRecognition.request();
+    return status.isGranted;
+  }
+
+  // ── DÉMARRAGE SESSION ──
+  Future<void> startSession() async {
     _loadProfile();
-    _peakDetector.reset();
     _goalNotified = false;
     _secondsSinceLastStep = 0;
+    _firstStepReceived = false;
+    _stepsAtSessionStart = 0;
     _currentData = const LiveSessionData(isActive: true);
     _sessionController.add(_currentData);
+
+    // Demande permission si nécessaire
+    await requestPermission();
+
+    // ── CAPTEUR PAS NATIF ──
+    _stepSubscription = Pedometer.stepCountStream.listen(
+      _onStepCount,
+      onError: _onStepError,
+      cancelOnError: false,
+    );
+
+    // ── STATUT MARCHE/ARRÊT ──
+    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+      _onPedestrianStatus,
+      onError: (_) {},
+      cancelOnError: false,
+    );
 
     // ── TIMER 1 seconde ──
     _timerSubscription =
@@ -180,15 +155,10 @@ class PedometerService {
 
       final newDuration = _currentData.durationSeconds + 1;
       final durationHours = newDuration / 3600;
-
-      // Vitesse et allure
       final speedKmh = durationHours > 0
           ? (_currentData.distance / durationHours)
           : 0.0;
-      final paceMinkm =
-          speedKmh > 0.5 ? (60 / speedKmh) : 0.0;
-
-      // Calories MET adaptatif
+      final paceMinkm = speedKmh > 0.5 ? (60 / speedKmh) : 0.0;
       final met = speedKmh > 6.0 ? 6.5 : 3.5;
       final calories = met * _weight * durationHours;
 
@@ -200,47 +170,48 @@ class PedometerService {
       );
       _sessionController.add(_currentData);
 
-      // Vérifie objectif toutes les 10 secondes
       if (newDuration % 10 == 0) _checkGoal();
     });
-
-    // ── ACCÉLÉROMÈTRE — fréquence optimisée ──
-    _accelSubscription = accelerometerEventStream(
-      samplingPeriod: SensorInterval.gameInterval,
-    ).listen(
-      (event) {
-        if (!_currentData.isActive) return;
-        try {
-          final stepDetected = _peakDetector.processAccelerometer(event);
-          if (stepDetected) {
-            _secondsSinceLastStep = 0;
-            _addStep();
-          }
-        } catch (_) {}
-      },
-      onError: (_) {},
-      cancelOnError: false,
-    );
   }
 
-  void _addStep() {
-    final newSteps = _currentData.steps + 1;
+  void _onStepCount(StepCount event) {
+    if (!_currentData.isActive) return;
 
-    // Anti-doublon : ignore si même valeur
-    if (newSteps == _lastStepCount) return;
-    _lastStepCount = newSteps;
+    // Premier événement — mémorise la valeur de référence
+    if (!_firstStepReceived) {
+      _stepsAtSessionStart = event.steps;
+      _firstStepReceived = true;
+      return;
+    }
 
-    final newDistance = newSteps * _strideLength / 1000;
+    // Calcule les pas depuis le début de la session
+    final sessionSteps = event.steps - _stepsAtSessionStart;
+    if (sessionSteps < 0) return; // protection redémarrage compteur
+
+    _secondsSinceLastStep = 0;
+    final newDistance = sessionSteps * _strideLength / 1000;
 
     _currentData = _currentData.copyWith(
-      steps: newSteps,
+      steps: sessionSteps,
       distance: newDistance,
     );
     _sessionController.add(_currentData);
 
     // Jalons TTS
-    _checkMilestone(newSteps);
-    _checkGoal(); // ← ajoute cette ligne
+    _checkMilestone(sessionSteps);
+    _checkGoal();
+  }
+
+  void _onStepError(error) {
+    // Capteur natif non disponible — fallback silencieux
+  }
+
+  void _onPedestrianStatus(PedestrianStatus event) {
+    // 'walking' ou 'stopped'
+    if (event.status == 'walking') {
+      _secondsSinceLastStep = 0;
+      if (!_currentData.isActive) resumeSession();
+    }
   }
 
   void _checkMilestone(int steps) {
@@ -274,42 +245,33 @@ class PedometerService {
   }
 
   void pauseSession() {
-    _accelSubscription?.pause();
+    _stepSubscription?.pause();
     _currentData = _currentData.copyWith(isActive: false);
     _sessionController.add(_currentData);
   }
 
   void resumeSession() {
     _secondsSinceLastStep = 0;
-    _accelSubscription?.resume();
+    _stepSubscription?.resume();
     _currentData = _currentData.copyWith(isActive: true);
     _sessionController.add(_currentData);
   }
 
   void stopSession() {
-    _accelSubscription?.cancel();
+    _stepSubscription?.cancel();
+    _statusSubscription?.cancel();
     _timerSubscription?.cancel();
-    _accelSubscription = null;
+    _stepSubscription = null;
+    _statusSubscription = null;
     _timerSubscription = null;
-    // Remet à zéro après sauvegarde
     _currentData = const LiveSessionData(isActive: false);
     _sessionController.add(_currentData);
-  }
-
-  void _saveDailySteps() {
-    final box = Hive.box(AppConstants.userProfileBox);
-    final today = _todayKey();
-    final existing =
-        box.get('daily_steps_$today', defaultValue: 0) as int;
-    box.put('daily_steps_$today', existing + _currentData.steps);
   }
 
   String _todayKey() {
     final now = DateTime.now();
     return '${now.year}-${now.month}-${now.day}';
   }
-
-  LiveSessionData get currentData => _currentData;
 
   void dispose() {
     stopSession();
@@ -327,8 +289,7 @@ final pedometerServiceProvider = Provider<PedometerService>((ref) {
 });
 
 final liveSessionProvider = StreamProvider<LiveSessionData>((ref) {
-  final service = ref.watch(pedometerServiceProvider);
-  return service.sessionStream;
+  return ref.watch(pedometerServiceProvider).sessionStream;
 });
 
 final dailyStepsProvider = StateProvider<int>((ref) {
