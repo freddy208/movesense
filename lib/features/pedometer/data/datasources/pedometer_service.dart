@@ -185,7 +185,7 @@ class PedometerService {
       }
     });
 
-    // ── 4. TIMER 1 secondes ──
+    // ── 4. TIMER 1 seconde ──
     _timerSubscription =
         Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_currentData.isActive) return;
