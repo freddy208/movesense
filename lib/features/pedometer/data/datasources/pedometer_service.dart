@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../audio/data/datasources/audio_service.dart';
 import '../../../audio/data/datasources/notification_service.dart';
@@ -62,11 +64,20 @@ class LiveSessionData {
 }
 
 // ═══════════════════════════════════════
-// PEDOMETER SERVICE — CAPTEUR NATIF
+// PEDOMETER SERVICE
+// Capteur natif (précision) + Accéléromètre (réactivité visuelle)
 // ═══════════════════════════════════════
 class PedometerService {
+  // Capteur natif
   StreamSubscription<StepCount>? _stepSubscription;
   StreamSubscription<PedestrianStatus>? _statusSubscription;
+
+  // Accéléromètre pour feedback visuel immédiat
+  StreamSubscription<AccelerometerEvent>? _accelSubscription;
+  int _accelStepBuffer = 0;
+  DateTime _lastAccelStep = DateTime.now();
+
+  // Timer
   Timer? _timerSubscription;
 
   final _sessionController =
@@ -76,11 +87,11 @@ class PedometerService {
   LiveSessionData _currentData = const LiveSessionData();
   LiveSessionData get currentData => _currentData;
 
-  // Pas de référence au démarrage de la session
+  // Référence pas au démarrage
   int _stepsAtSessionStart = 0;
   bool _firstStepReceived = false;
 
-  // Profil utilisateur
+  // Profil
   double _weight = 70.0;
   double _strideLength = 0.75;
   int _dailyGoal = 10000;
@@ -91,8 +102,6 @@ class PedometerService {
 
   // Objectif notifié
   bool _goalNotified = false;
-
-  // Statut marche/arrêt
 
   void _loadProfile() {
     final box = Hive.box(AppConstants.userProfileBox);
@@ -107,7 +116,6 @@ class PedometerService {
     );
   }
 
-  // ── DEMANDE PERMISSION ──
   static Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
     return status.isGranted;
@@ -120,34 +128,69 @@ class PedometerService {
     _secondsSinceLastStep = 0;
     _firstStepReceived = false;
     _stepsAtSessionStart = 0;
+    _accelStepBuffer = 0;
     _currentData = const LiveSessionData(isActive: true);
     _sessionController.add(_currentData);
 
-    // Demande permission si nécessaire
     await requestPermission();
 
-    // ── CAPTEUR PAS NATIF ──
-    _stepSubscription = Pedometer.stepCountStream.listen(
+    // ── 1. CAPTEUR NATIF (précision) ──
+    _stepSubscription = Pedometer.stepCountStream
+        .distinct((prev, next) => prev.steps == next.steps)
+        .listen(
       _onStepCount,
-      onError: _onStepError,
-      cancelOnError: false,
-    );
-
-    // ── STATUT MARCHE/ARRÊT ──
-    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-      _onPedestrianStatus,
       onError: (_) {},
       cancelOnError: false,
     );
 
-    // ── TIMER 1 seconde ──
+    // ── 2. STATUT MARCHE ──
+    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+      (event) {
+        if (event.status == 'walking') {
+          _secondsSinceLastStep = 0;
+        }
+      },
+      onError: (_) {},
+      cancelOnError: false,
+    );
+
+    // ── 3. ACCÉLÉROMÈTRE (réactivité visuelle) ──
+    _accelSubscription = accelerometerEventStream(
+      samplingPeriod: SensorInterval.gameInterval,
+    ).listen((event) {
+      if (!_currentData.isActive) return;
+      if (!_firstStepReceived) return;
+
+      final mag = sqrt(
+        event.x * event.x + event.y * event.y + event.z * event.z,
+      );
+
+      // Détecte mouvement → feedback visuel immédiat
+      if (mag > 11.5) {
+        final now = DateTime.now();
+        if (now.difference(_lastAccelStep).inMilliseconds > 300) {
+          _lastAccelStep = now;
+          _accelStepBuffer++;
+          _secondsSinceLastStep = 0;
+
+          // Affichage visuel = pas réels + buffer accéléromètre
+          final visualSteps = _currentData.steps + _accelStepBuffer;
+          final visualDist = visualSteps * _strideLength / 1000;
+          _currentData = _currentData.copyWith(
+            steps: visualSteps,
+            distance: visualDist,
+          );
+          _sessionController.add(_currentData);
+        }
+      }
+    });
+
+    // ── 4. TIMER 1 seconde ──
     _timerSubscription =
         Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_currentData.isActive) return;
-
       _secondsSinceLastStep++;
 
-      // Auto-pause si immobile 2 minutes
       if (_secondsSinceLastStep >= _autoPauseSeconds) {
         pauseSession();
         return;
@@ -174,44 +217,33 @@ class PedometerService {
     });
   }
 
+  // ── CAPTEUR NATIF → recale le buffer ──
   void _onStepCount(StepCount event) {
     if (!_currentData.isActive) return;
 
-    // Premier événement — mémorise la valeur de référence
     if (!_firstStepReceived) {
       _stepsAtSessionStart = event.steps;
       _firstStepReceived = true;
+      _accelStepBuffer = 0;
       return;
     }
 
-    // Calcule les pas depuis le début de la session
-    final sessionSteps = event.steps - _stepsAtSessionStart;
-    if (sessionSteps < 0) return; // protection redémarrage compteur
+    final realSteps = event.steps - _stepsAtSessionStart;
+    if (realSteps < 0) return;
 
+    // Recale le buffer sur la vraie valeur
+    _accelStepBuffer = 0;
     _secondsSinceLastStep = 0;
-    final newDistance = sessionSteps * _strideLength / 1000;
 
+    final newDistance = realSteps * _strideLength / 1000;
     _currentData = _currentData.copyWith(
-      steps: sessionSteps,
+      steps: realSteps,
       distance: newDistance,
     );
     _sessionController.add(_currentData);
 
-    // Jalons TTS
-    _checkMilestone(sessionSteps);
+    _checkMilestone(realSteps);
     _checkGoal();
-  }
-
-  void _onStepError(error) {
-    // Capteur natif non disponible — fallback silencieux
-  }
-
-  void _onPedestrianStatus(PedestrianStatus event) {
-    // 'walking' ou 'stopped'
-    if (event.status == 'walking') {
-      _secondsSinceLastStep = 0;
-      if (!_currentData.isActive) resumeSession();
-    }
   }
 
   void _checkMilestone(int steps) {
@@ -246,6 +278,7 @@ class PedometerService {
 
   void pauseSession() {
     _stepSubscription?.pause();
+    _accelSubscription?.pause();
     _currentData = _currentData.copyWith(isActive: false);
     _sessionController.add(_currentData);
   }
@@ -253,6 +286,7 @@ class PedometerService {
   void resumeSession() {
     _secondsSinceLastStep = 0;
     _stepSubscription?.resume();
+    _accelSubscription?.resume();
     _currentData = _currentData.copyWith(isActive: true);
     _sessionController.add(_currentData);
   }
@@ -260,9 +294,11 @@ class PedometerService {
   void stopSession() {
     _stepSubscription?.cancel();
     _statusSubscription?.cancel();
+    _accelSubscription?.cancel();
     _timerSubscription?.cancel();
     _stepSubscription = null;
     _statusSubscription = null;
+    _accelSubscription = null;
     _timerSubscription = null;
     _currentData = const LiveSessionData(isActive: false);
     _sessionController.add(_currentData);
