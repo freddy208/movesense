@@ -21,41 +21,61 @@ enum HeartZone {
 extension HeartZoneExt on HeartZone {
   String get label {
     switch (this) {
-      case HeartZone.rest: return 'Repos';
-      case HeartZone.light: return 'Légère';
-      case HeartZone.moderate: return 'Modérée';
-      case HeartZone.intense: return 'Intense';
-      case HeartZone.maximum: return 'Maximum';
+      case HeartZone.rest:
+        return 'Repos';
+      case HeartZone.light:
+        return 'Légère';
+      case HeartZone.moderate:
+        return 'Modérée';
+      case HeartZone.intense:
+        return 'Intense';
+      case HeartZone.maximum:
+        return 'Maximum';
     }
   }
 
   Color get color {
     switch (this) {
-      case HeartZone.rest: return const Color(0xFF3498DB);
-      case HeartZone.light: return AppColors.successGreen;
-      case HeartZone.moderate: return AppColors.energyOrange;
-      case HeartZone.intense: return const Color(0xFFE67E22);
-      case HeartZone.maximum: return AppColors.alertRed;
+      case HeartZone.rest:
+        return const Color(0xFF3498DB);
+      case HeartZone.light:
+        return AppColors.successGreen;
+      case HeartZone.moderate:
+        return AppColors.energyOrange;
+      case HeartZone.intense:
+        return const Color(0xFFE67E22);
+      case HeartZone.maximum:
+        return AppColors.alertRed;
     }
   }
 
   String get emoji {
     switch (this) {
-      case HeartZone.rest: return '😴';
-      case HeartZone.light: return '🚶';
-      case HeartZone.moderate: return '🏃';
-      case HeartZone.intense: return '⚡';
-      case HeartZone.maximum: return '🔥';
+      case HeartZone.rest:
+        return '😴';
+      case HeartZone.light:
+        return '🚶';
+      case HeartZone.moderate:
+        return '🏃';
+      case HeartZone.intense:
+        return '⚡';
+      case HeartZone.maximum:
+        return '🔥';
     }
   }
 
   String get description {
     switch (this) {
-      case HeartZone.rest: return '< 50% FC max — Récupération';
-      case HeartZone.light: return '50-60% FC max — Brûle les graisses';
-      case HeartZone.moderate: return '60-70% FC max — Cardio optimal';
-      case HeartZone.intense: return '70-85% FC max — Performance';
-      case HeartZone.maximum: return '> 85% FC max — Effort maximal';
+      case HeartZone.rest:
+        return '< 50% FC max — Récupération';
+      case HeartZone.light:
+        return '50-60% FC max — Brûle les graisses';
+      case HeartZone.moderate:
+        return '60-70% FC max — Cardio optimal';
+      case HeartZone.intense:
+        return '70-85% FC max — Performance';
+      case HeartZone.maximum:
+        return '> 85% FC max — Effort maximal';
     }
   }
 }
@@ -103,14 +123,26 @@ class HeartRateService {
   HeartRateData _current = const HeartRateData();
   HeartRateData get current => _current;
 
+  // Dernière valeur even après stop()
+  HeartRateData? _lastValue;
+
   // Paramètres utilisateur
   int _age = 25;
   int _maxHr = 195; // 220 - age
 
   // Lissage accéléromètre
   final List<double> _magnitudes = [];
-  static const int _smoothWindow = 20;
+  static const int _smoothWindow =
+      60; // Augmenté à 60 échantillons (~2sec à 30Hz)
   static const int _historyMax = 60;
+
+  // Filtre médian pour le BPM
+  final List<int> _bpmBuffer = [];
+  static const int _medianWindow = 5;
+
+  // Lissage exponentiel (EMA) — alpha plus bas = plus lisse
+  static const double _emaAlpha = 0.15;
+  double? _emaBpm;
 
   // Anti-spam alertes
   DateTime _lastAlert = DateTime(2000);
@@ -119,6 +151,8 @@ class HeartRateService {
     _age = age;
     _maxHr = 220 - age;
     _magnitudes.clear();
+    _bpmBuffer.clear();
+    _emaBpm = null;
 
     _accelSub = accelerometerEventStream(
       samplingPeriod: SensorInterval.normalInterval,
@@ -135,10 +169,32 @@ class HeartRateService {
 
     final avg = _magnitudes.reduce((a, b) => a + b) / _magnitudes.length;
 
-    // Mapping magnitude → BPM
+    // Mapping magnitude → BPM brut
     // Au repos : mag ≈ 9.8 (gravité), mouvement : 10-20+
     final activity = (avg - 9.5).clamp(0.0, 12.0);
-    final bpm = (60 + (activity / 12.0) * 100).toInt().clamp(55, 165);
+    final rawBpm = (60 + (activity / 12.0) * 100).toInt().clamp(55, 165);
+
+    // ── FILTRE MÉDIAN ──
+    _bpmBuffer.add(rawBpm);
+    if (_bpmBuffer.length > _medianWindow) _bpmBuffer.removeAt(0);
+    final sorted = List<int>.from(_bpmBuffer)..sort();
+    final medianBpm = sorted[sorted.length ~/ 2];
+
+    // ── LISSAGE EXPONENTIEL (EMA) ──
+    if (_emaBpm == null) {
+      _emaBpm = medianBpm.toDouble();
+    } else {
+      _emaBpm = _emaAlpha * medianBpm + (1 - _emaAlpha) * _emaBpm!;
+    }
+    final smoothedBpm = _emaBpm!.round();
+
+    // ── FILTRE DE DÉRIVÉE (limite variation à ±5 BPM) ──
+    final bpm = _current.bpm == 0
+        ? smoothedBpm
+        : (smoothedBpm).clamp(
+            _current.bpm - 5,
+            _current.bpm + 5,
+          );
 
     final zone = _getZone(bpm);
     final zonePercent = bpm / _maxHr;
@@ -160,6 +216,7 @@ class HeartRateService {
       history: newHistory,
     );
 
+    _lastValue = _current;
     _controller.add(_current);
   }
 
@@ -201,7 +258,17 @@ class HeartRateService {
   void stop() {
     _accelSub?.cancel();
     _accelSub = null;
+
+    // Émet une dernière valeur stable avec isAlerting false pour éviter
+    // l'affichage de valeurs nulles sur le dashboard
+    if (_lastValue != null) {
+      final stabilized = _lastValue!.copyWith(isAlerting: false);
+      _controller.add(stabilized);
+    }
   }
+
+  // Getter pour la dernière valeur connue (même après stop)
+  HeartRateData? get lastValue => _lastValue;
 
   void dispose() {
     stop();

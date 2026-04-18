@@ -191,7 +191,7 @@ class GpsService {
 
     const locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: 5, // min 5 mètres entre 2 points
+      distanceFilter: 1, // min 1 mètre pour plus de réactivité
     );
 
     _positionSubscription = Geolocator.getPositionStream(
@@ -282,9 +282,8 @@ class GpsService {
       'date': DateTime.now().toIso8601String(),
       'points': simplified.map((p) => p.toMap()).toList(),
       'distance': _currentData.totalDistance,
-      'duration': DateTime.now()
-          .difference(simplified.first.timestamp)
-          .inSeconds,
+      'duration':
+          DateTime.now().difference(simplified.first.timestamp).inSeconds,
     });
   }
 

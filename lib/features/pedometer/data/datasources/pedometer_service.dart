@@ -65,29 +65,30 @@ class LiveSessionData {
 
 // ═══════════════════════════════════════
 // PEDOMETER SERVICE
-// Capteur natif (précision) + Accéléromètre (réactivité visuelle)
+// Priorité : capteur natif → fallback accéléromètre si aucun pas après 5s
 // ═══════════════════════════════════════
 class PedometerService {
   // Capteur natif
   StreamSubscription<StepCount>? _stepSubscription;
   StreamSubscription<PedestrianStatus>? _statusSubscription;
 
-  // Accéléromètre pour feedback visuel immédiat
+  // Fallback accéléromètre
   StreamSubscription<AccelerometerEvent>? _accelSubscription;
+  bool _useNative = true;
   int _accelStepBuffer = 0;
-  DateTime _lastAccelStep = DateTime.now();
+  double _gravity = 9.81;
+  DateTime? _lastAccelPeak;
 
   // Timer
   Timer? _timerSubscription;
+  Timer? _fallbackTimer;
 
-  final _sessionController =
-      StreamController<LiveSessionData>.broadcast();
+  final _sessionController = StreamController<LiveSessionData>.broadcast();
   Stream<LiveSessionData> get sessionStream => _sessionController.stream;
 
   LiveSessionData _currentData = const LiveSessionData();
   LiveSessionData get currentData => _currentData;
 
-  // Référence pas au démarrage
   int _stepsAtSessionStart = 0;
   bool _firstStepReceived = false;
 
@@ -121,25 +122,34 @@ class PedometerService {
     return status.isGranted;
   }
 
-  // ── DÉMARRAGE SESSION ──
   Future<void> startSession() async {
     _loadProfile();
     _goalNotified = false;
     _secondsSinceLastStep = 0;
     _firstStepReceived = false;
     _stepsAtSessionStart = 0;
+    _useNative = true;
     _accelStepBuffer = 0;
+    _gravity = 9.81;
+    _lastAccelPeak = null;
     _currentData = const LiveSessionData(isActive: true);
     _sessionController.add(_currentData);
 
-    await requestPermission();
+    final granted = await requestPermission();
+    if (!granted) {
+      print('Pedometer permission denied');
+      return;
+    }
 
-    // ── 1. CAPTEUR NATIF (précision) ──
+    // ── 1. CAPTEUR NATIF ──
     _stepSubscription = Pedometer.stepCountStream
         .distinct((prev, next) => prev.steps == next.steps)
         .listen(
-      _onStepCount,
-      onError: (_) {},
+      (event) {
+        if (!_useNative) return; // Ignore si fallback actif
+        _onNativeStep(event);
+      },
+      onError: (e) => print('StepCount error: $e'),
       cancelOnError: false,
     );
 
@@ -150,89 +160,43 @@ class PedometerService {
           _secondsSinceLastStep = 0;
         }
       },
-      onError: (_) {},
+      onError: (e) => print('PedestrianStatus error: $e'),
       cancelOnError: false,
     );
 
-    // ── 3. ACCÉLÉROMÈTRE (réactivité visuelle) ──
-    _accelSubscription = accelerometerEventStream(
-      samplingPeriod: SensorInterval.gameInterval,
-    ).listen((event) {
-      if (!_currentData.isActive) return;
-      if (!_firstStepReceived) return;
-
-      final mag = sqrt(
-        event.x * event.x + event.y * event.y + event.z * event.z,
-      );
-
-      // Détecte mouvement → feedback visuel immédiat
-      if (mag > 11.5) {
-        final now = DateTime.now();
-        if (now.difference(_lastAccelStep).inMilliseconds > 300) {
-          _lastAccelStep = now;
-          _accelStepBuffer++;
-          _secondsSinceLastStep = 0;
-
-          // Affichage visuel = pas réels + buffer accéléromètre
-          final visualSteps = _currentData.steps + _accelStepBuffer;
-          final visualDist = visualSteps * _strideLength / 1000;
-          _currentData = _currentData.copyWith(
-            steps: visualSteps,
-            distance: visualDist,
-          );
-          _sessionController.add(_currentData);
-        }
-      }
-    });
-
-    // ── 4. TIMER 1 seconde ──
+    // ── 3. TIMER ──
     _timerSubscription =
-        Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!_currentData.isActive) return;
-      _secondsSinceLastStep++;
+        Timer.periodic(const Duration(seconds: 1), (_) => _tick());
 
-      if (_secondsSinceLastStep >= _autoPauseSeconds) {
-        pauseSession();
-        return;
+    // ── 4. FALLBACK DETECTION ──
+    // Si aucun pas natif reçu après 5s → bascule accéléromètre
+    _fallbackTimer = Timer(const Duration(seconds: 5), () {
+      if (_useNative && !_firstStepReceived && _currentData.isActive) {
+        print('No native steps after 5s → switching to accelerometer fallback');
+        _switchToFallback();
       }
-
-      final newDuration = _currentData.durationSeconds + 1;
-      final durationHours = newDuration / 3600;
-      final speedKmh = durationHours > 0
-          ? (_currentData.distance / durationHours)
-          : 0.0;
-      final paceMinkm = speedKmh > 0.5 ? (60 / speedKmh) : 0.0;
-      final met = speedKmh > 6.0 ? 6.5 : 3.5;
-      final calories = met * _weight * durationHours;
-
-      _currentData = _currentData.copyWith(
-        durationSeconds: newDuration,
-        speedKmh: speedKmh,
-        paceMinkm: paceMinkm,
-        calories: calories,
-      );
-      _sessionController.add(_currentData);
-
-      if (newDuration % 10 == 0) _checkGoal();
     });
   }
 
-  // ── CAPTEUR NATIF → recale le buffer ──
-  void _onStepCount(StepCount event) {
+  void _onNativeStep(StepCount event) {
     if (!_currentData.isActive) return;
+
+    // Annule le timer de fallback car on a reçu un pas natif
+    _fallbackTimer?.cancel();
 
     if (!_firstStepReceived) {
       _stepsAtSessionStart = event.steps;
       _firstStepReceived = true;
-      _accelStepBuffer = 0;
       return;
     }
 
-    final realSteps = event.steps - _stepsAtSessionStart;
-    if (realSteps < 0) return;
+    int realSteps = event.steps - _stepsAtSessionStart;
+    if (realSteps < 0) {
+      // Reset du capteur
+      _stepsAtSessionStart = event.steps;
+      return;
+    }
 
-    // Recale le buffer sur la vraie valeur
-    _accelStepBuffer = 0;
     _secondsSinceLastStep = 0;
 
     final newDistance = realSteps * _strideLength / 1000;
@@ -244,6 +208,86 @@ class PedometerService {
 
     _checkMilestone(realSteps);
     _checkGoal();
+  }
+
+  // ═══════════════════════════════════════
+  // FALLBACK ACCÉLÉROMÈTRE
+  // ═══════════════════════════════════════
+  void _switchToFallback() {
+    _useNative = false;
+    // Annule le capteur natif (economie & évite double-comptage)
+    _stepSubscription?.cancel();
+    _stepSubscription = null;
+    // Conserve les pas déjà comptés éventuels (0 la plupart du temps)
+    _accelStepBuffer = _currentData.steps;
+    _lastAccelPeak = DateTime.now();
+
+    _accelSubscription = accelerometerEventStream(
+      samplingPeriod: SensorInterval.gameInterval,
+    ).listen(_onAccelerometer);
+
+    print('Accelerometer fallback activated');
+  }
+
+  void _onAccelerometer(AccelerometerEvent event) {
+    if (!_currentData.isActive) return;
+
+    final magnitude =
+        sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+
+    // Filtre passe-bas pour estimer la gravité
+    _gravity = 0.92 * _gravity + 0.08 * magnitude;
+    final linearAcc = magnitude - _gravity;
+
+    final now = DateTime.now();
+    if (linearAcc > 2.0 &&
+        _lastAccelPeak != null &&
+        now.difference(_lastAccelPeak!).inMilliseconds > 300) {
+      _lastAccelPeak = now;
+      _accelStepBuffer++;
+
+      _secondsSinceLastStep = 0;
+
+      final newDistance = _accelStepBuffer * _strideLength / 1000;
+      _currentData = _currentData.copyWith(
+        steps: _accelStepBuffer,
+        distance: newDistance,
+      );
+      _sessionController.add(_currentData);
+
+      _checkMilestone(_accelStepBuffer);
+      _checkGoal();
+    }
+  }
+
+  // ═══════════════════════════════════════
+  // TIMER & MÉTRIQUES
+  // ═══════════════════════════════════════
+  void _tick() {
+    if (!_currentData.isActive) return;
+    _secondsSinceLastStep++;
+
+    if (_secondsSinceLastStep >= _autoPauseSeconds) {
+      pauseSession();
+      return;
+    }
+
+    final newDuration = _currentData.durationSeconds + 1;
+    final hours = newDuration / 3600;
+    final speedKmh = hours > 0 ? _currentData.distance / hours : 0.0;
+    final paceMinkm = speedKmh > 0.5 ? 60 / speedKmh : 0.0;
+    final met = speedKmh > 6.0 ? 6.5 : 3.5;
+    final calories = met * _weight * hours;
+
+    _currentData = _currentData.copyWith(
+      durationSeconds: newDuration,
+      speedKmh: speedKmh,
+      paceMinkm: paceMinkm,
+      calories: calories,
+    );
+    _sessionController.add(_currentData);
+
+    if (newDuration % 10 == 0) _checkGoal();
   }
 
   void _checkMilestone(int steps) {
@@ -296,10 +340,12 @@ class PedometerService {
     _statusSubscription?.cancel();
     _accelSubscription?.cancel();
     _timerSubscription?.cancel();
+    _fallbackTimer?.cancel();
     _stepSubscription = null;
     _statusSubscription = null;
     _accelSubscription = null;
     _timerSubscription = null;
+    _fallbackTimer = null;
     _currentData = const LiveSessionData(isActive: false);
     _sessionController.add(_currentData);
   }
@@ -330,7 +376,8 @@ final liveSessionProvider = StreamProvider<LiveSessionData>((ref) {
 
 final dailyStepsProvider = StateProvider<int>((ref) {
   final box = Hive.box(AppConstants.userProfileBox);
-  return box.get('daily_steps_${_todayKey()}', defaultValue: 0);
+  final today = _todayKey();
+  return box.get('daily_steps_$today', defaultValue: 0);
 });
 
 final dailyGoalProvider = StateProvider<int>((ref) {

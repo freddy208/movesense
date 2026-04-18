@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Badge;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lottie/lottie.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'dashboard_screen.dart';
 import 'history_screen.dart';
@@ -10,10 +11,134 @@ import '../../../ai_advisor/presentation/screens/ai_screen.dart';
 import '../../../audio/presentation/screens/audio_screen.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
 import '../../../../core/utils/app_router.dart';
-import '../../../gamification/data/datasources/badge_service.dart';
-import '../../../gamification/presentation/screens/badges_screen.dart';
+import '../../../gamification/data/datasources/badge_service.dart'
+    as badge_model;
 import '../../../../core/utils/app_state_provider.dart';
 import '../../../audio/data/datasources/audio_service.dart';
+
+// ═══════════════════════════════════════
+// DIALOG BADGE DÉBLOQUÉ (remplace overlay)
+// ═══════════════════════════════════════
+class BadgeUnlockedDialog extends StatelessWidget {
+  final badge_model.Badge badge;
+  const BadgeUnlockedDialog({super.key, required this.badge});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Container(
+        padding: const EdgeInsets.all(28),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A2A3A),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: badge.color.withValues(alpha: 0.6),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: badge.color.withValues(alpha: 0.35),
+              blurRadius: 40,
+              spreadRadius: 8,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Animation Lottie
+            SizedBox(
+              height: 130,
+              child: Lottie.asset(
+                'assets/animations/badge_unlock.json',
+                repeat: false,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Emoji badge
+            Text(
+              badge.emoji,
+              style: const TextStyle(fontSize: 56),
+            ),
+            const SizedBox(height: 12),
+
+            // Nom du badge
+            Text(
+              badge.name,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: badge.color,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Description
+            Text(
+              badge.description,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Roboto',
+                fontSize: 14,
+                color: Colors.white.withValues(alpha: 0.55),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // XP + bouton
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.energyOrange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: AppColors.energyOrange.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '+${badge.xpReward} XP',
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.energyOrange,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: FloatingActionButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    backgroundColor: AppColors.successGreen,
+                    elevation: 0,
+                    child: const Icon(Icons.check_rounded,
+                        color: Colors.white, size: 28),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // ═══════════════════════════════════════
 // TRANSITIONS FLUIDES
@@ -97,7 +222,6 @@ class MainScreen extends ConsumerStatefulWidget {
   ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-
 class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
   int _currentIndex = 0;
@@ -126,33 +250,34 @@ class _MainScreenState extends ConsumerState<MainScreen>
     // Écoute fin de session → affiche badges débloqués
     ref.listen(sessionRefreshProvider, (prev, next) async {
       if (prev == null || next <= prev) return;
-      await Future.delayed(const Duration(milliseconds: 500));
 
-      final badgeService = BadgeService();
+      // Attendre que la navigation de fin de session se termine
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      final badgeService = badge_model.BadgeService();
       final badges = await badgeService.loadBadges();
       final now = DateTime.now();
-      final recentBadges = badges.where((b) =>
-        b.isUnlocked &&
-        b.unlockedAt != null &&
-        now.difference(b.unlockedAt!).inSeconds < 15
-      ).toList();
+      final recentBadges = badges
+          .where((b) =>
+              b.isUnlocked &&
+              b.unlockedAt != null &&
+              now.difference(b.unlockedAt!).inSeconds < 20)
+          .toList();
+
+      if (!mounted) return;
 
       for (final badge in recentBadges) {
         if (!mounted) return;
-        // Son du badge
         await AudioService().playSound(AppSound.badge);
-        // Overlay plein écran sans Scaffold
-        await Navigator.of(context).push(
-          PageRouteBuilder(
-            opaque: false,
-            barrierColor: Colors.black.withValues(alpha: 0.8),
-            pageBuilder: (_, __, ___) => BadgeUnlockOverlay(
-              badge: badge,
-              onDismiss: () => Navigator.of(context).pop(),
-            ),
-          ),
-        );
-        await Future.delayed(const Duration(milliseconds: 300));
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            barrierColor: Colors.black.withValues(alpha: 0.6),
+            builder: (_) => BadgeUnlockedDialog(badge: badge),
+          );
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
       }
     });
 
@@ -279,10 +404,13 @@ class _MainScreenState extends ConsumerState<MainScreen>
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _navItem(0, Icons.home_rounded, Icons.home_outlined, 'Accueil'),
-              _navItem(1, Icons.bar_chart_rounded, Icons.bar_chart_outlined, 'Stats'),
+              _navItem(1, Icons.bar_chart_rounded, Icons.bar_chart_outlined,
+                  'Stats'),
               _navItem(2, Icons.map_rounded, Icons.map_outlined, 'Carte'),
-              _navItem(3, Icons.emoji_events_rounded, Icons.emoji_events_outlined, 'XP'),
-              _navItem(4, Icons.psychology_rounded, Icons.psychology_outlined, 'IA'),
+              _navItem(3, Icons.emoji_events_rounded,
+                  Icons.emoji_events_outlined, 'XP'),
+              _navItem(
+                  4, Icons.psychology_rounded, Icons.psychology_outlined, 'IA'),
             ],
           ),
         ),
@@ -290,7 +418,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
     );
   }
 
-  Widget _navItem(int index, IconData activeIcon, IconData inactiveIcon, String label) {
+  Widget _navItem(
+      int index, IconData activeIcon, IconData inactiveIcon, String label) {
     final isSelected = _currentIndex == index;
     return GestureDetector(
       onTap: () => _onTabTapped(index),
@@ -304,7 +433,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
               : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
           border: isSelected
-              ? Border.all(color: AppColors.energyOrange.withValues(alpha: 0.25))
+              ? Border.all(
+                  color: AppColors.energyOrange.withValues(alpha: 0.25))
               : null,
         ),
         child: Column(

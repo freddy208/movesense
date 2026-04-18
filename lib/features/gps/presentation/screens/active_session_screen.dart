@@ -23,7 +23,6 @@ class ActiveSessionScreen extends ConsumerStatefulWidget {
 class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen>
     with TickerProviderStateMixin {
   final MapController _mapController = MapController();
-  bool _isPaused = false;
   bool _followUser = true;
   bool _panelExpanded = false;
 
@@ -62,6 +61,29 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen>
 
   void _startServices() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final pedometerGranted = await PedometerService.requestPermission();
+      final gpsGranted = await ref.read(gpsServiceProvider).requestPermission();
+
+      if (!pedometerGranted || !gpsGranted) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Permission nécessaire'),
+              content: const Text(
+                  'Veuillez accorder les permissions d\'activité physique et de localisation dans les paramètres.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
       ref.read(gpsServiceProvider).startTracking();
       ref.read(pedometerServiceProvider).startSession();
 
@@ -81,8 +103,9 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen>
 
   void _togglePause() {
     HapticFeedback.mediumImpact();
-    setState(() => _isPaused = !_isPaused);
-    if (_isPaused) {
+    final current = ref.read(liveSessionProvider).valueOrNull;
+    final isActive = current?.isActive ?? false;
+    if (isActive) {
       ref.read(gpsServiceProvider).pauseTracking();
       ref.read(pedometerServiceProvider).pauseSession();
     } else {
@@ -100,32 +123,32 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen>
     );
   }
 
-void _confirmStop() async {
-  final sessionData = ref.read(liveSessionProvider).valueOrNull;
-  final gpsData = ref.read(liveGpsProvider).valueOrNull;
+  void _confirmStop() async {
+    final sessionData = ref.read(liveSessionProvider).valueOrNull;
+    final gpsData = ref.read(liveGpsProvider).valueOrNull;
 
-  // Arrête les services
-  ref.read(gpsServiceProvider).stopTracking();
-  ref.read(pedometerServiceProvider).stopSession();
-  ref.read(heartRateServiceProvider).stop();
-  AudioService().stopMusic();
+    // Arrête les services
+    ref.read(gpsServiceProvider).stopTracking();
+    ref.read(pedometerServiceProvider).stopSession();
+    ref.read(heartRateServiceProvider).stop();
+    AudioService().stopMusic();
 
-  // Notifie AVANT de pop (contexte encore valide)
-  if (sessionData != null && gpsData != null) {
-    await SessionCompletionService.onSessionComplete(
-      session: sessionData,
-      gpsData: gpsData,
-    );
-    // Notifie ici — avant de quitter l'écran
-    ref.read(sessionRefreshProvider.notifier).state++;
+    // Notifie AVANT de pop (contexte encore valide)
+    if (sessionData != null && gpsData != null) {
+      await SessionCompletionService.onSessionComplete(
+        session: sessionData,
+        gpsData: gpsData,
+      );
+      // Notifie ici — avant de quitter l'écran
+      ref.read(sessionRefreshProvider.notifier).state++;
+    }
+
+    // Pop après la notification
+    if (mounted) {
+      Navigator.of(context).pop(); // dialog
+      Navigator.of(context).pop(); // screen
+    }
   }
-
-  // Pop après la notification
-  if (mounted) {
-    Navigator.of(context).pop(); // dialog
-    Navigator.of(context).pop(); // screen
-  }
-}
 
   @override
   void dispose() {
@@ -159,11 +182,15 @@ void _confirmStop() async {
         children: [
           _buildMap(gps),
           Positioned(
-            top: 0, left: 0, right: 0,
+            top: 0,
+            left: 0,
+            right: 0,
             child: _buildTopOverlay(session, gps),
           ),
           Positioned(
-            bottom: 0, left: 0, right: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
             child: _buildBottomPanel(session, gps, bpm, zone),
           ),
           Positioned(
@@ -266,7 +293,8 @@ void _confirmStop() async {
                             shape: BoxShape.circle,
                             color: AppColors.activeBlue.withValues(alpha: 0.2),
                             border: Border.all(
-                              color: AppColors.activeBlue.withValues(alpha: 0.4),
+                              color:
+                                  AppColors.activeBlue.withValues(alpha: 0.4),
                               width: 1,
                             ),
                           ),
@@ -281,7 +309,8 @@ void _confirmStop() async {
                           border: Border.all(color: Colors.white, width: 2.5),
                           boxShadow: [
                             BoxShadow(
-                              color: AppColors.activeBlue.withValues(alpha: 0.6),
+                              color:
+                                  AppColors.activeBlue.withValues(alpha: 0.6),
                               blurRadius: 8,
                               spreadRadius: 2,
                             ),
@@ -302,10 +331,26 @@ void _confirmStop() async {
       BuildContext context, Widget tileWidget, TileImage tile) {
     return ColorFiltered(
       colorFilter: const ColorFilter.matrix([
-        -0.2, 0, 0, 0, 50,
-        0, -0.2, 0, 0, 50,
-        0, 0, -0.2, 0, 70,
-        0, 0, 0, 1, 0,
+        -0.2,
+        0,
+        0,
+        0,
+        50,
+        0,
+        -0.2,
+        0,
+        0,
+        50,
+        0,
+        0,
+        -0.2,
+        0,
+        70,
+        0,
+        0,
+        0,
+        1,
+        0,
       ]),
       child: tileWidget,
     );
@@ -339,8 +384,8 @@ void _confirmStop() async {
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15)),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.15)),
                   ),
                   child: const Icon(Icons.arrow_back_ios_rounded,
                       color: Colors.white, size: 18),
@@ -368,15 +413,15 @@ void _confirmStop() async {
                             width: 7,
                             height: 7,
                             decoration: BoxDecoration(
-                              color: _isPaused
-                                  ? AppColors.energyOrange
-                                  : AppColors.successGreen,
+                              color: session?.isActive == true
+                                  ? AppColors.successGreen
+                                  : AppColors.energyOrange,
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: (_isPaused
-                                          ? AppColors.energyOrange
-                                          : AppColors.successGreen)
+                                  color: (session?.isActive == true
+                                          ? AppColors.successGreen
+                                          : AppColors.energyOrange)
                                       .withValues(
                                           alpha: _pulseAnimation.value - 0.5),
                                   blurRadius: 6,
@@ -387,7 +432,7 @@ void _confirmStop() async {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          _isPaused ? 'En pause' : 'En cours',
+                          session?.isActive == true ? 'En cours' : 'En pause',
                           style: TextStyle(
                             fontFamily: 'Roboto',
                             fontSize: 12,
@@ -400,13 +445,13 @@ void _confirmStop() async {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.15)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.15)),
                 ),
                 child: Text(
                   session?.formattedDuration ?? '00:00',
@@ -532,29 +577,29 @@ void _confirmStop() async {
                       duration: const Duration(milliseconds: 250),
                       height: 56,
                       decoration: BoxDecoration(
-                        color: _isPaused
-                            ? AppColors.successGreen
-                            : Colors.white.withValues(alpha: 0.08),
+                        color: session?.isActive == true
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : AppColors.successGreen,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: _isPaused
-                              ? AppColors.successGreen
-                              : Colors.white.withValues(alpha: 0.15),
+                          color: session?.isActive == true
+                              ? Colors.white.withValues(alpha: 0.15)
+                              : AppColors.successGreen,
                         ),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            _isPaused
-                                ? Icons.play_arrow_rounded
-                                : Icons.pause_rounded,
+                            session?.isActive == true
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
                             color: Colors.white,
                             size: 24,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _isPaused ? 'Reprendre' : 'Pause',
+                            session?.isActive == true ? 'Pause' : 'Reprendre',
                             style: const TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 15,
@@ -628,8 +673,7 @@ void _confirmStop() async {
               Expanded(
                 child: _buildDetailCard(
                   label: 'Altitude',
-                  value:
-                      '${(gps?.currentAltitude ?? 0).toStringAsFixed(0)} m',
+                  value: '${(gps?.currentAltitude ?? 0).toStringAsFixed(0)} m',
                   icon: Icons.terrain_rounded,
                   color: AppColors.activeBlue,
                 ),

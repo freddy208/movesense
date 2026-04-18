@@ -10,6 +10,7 @@ import '../../../pedometer/data/datasources/pedometer_service.dart';
 import '../../../gps/presentation/screens/active_session_screen.dart';
 import '../../../../core/utils/app_router.dart';
 import '../../../audio/data/datasources/audio_service.dart';
+import '../../../heart_rate/data/datasources/heart_rate_service.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -45,7 +46,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   String get _todayQuote {
     final dayIndex = DateTime.now().day % _motivationalQuotes.length;
     return _motivationalQuotes[dayIndex];
-  } 
+  }
+
   // Add new method
   void _showQuickGoalEditor() {
     HapticFeedback.lightImpact();
@@ -66,14 +68,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             padding: const EdgeInsets.all(24),
             decoration: const BoxDecoration(
               color: Color(0xFF1A2A3A),
-              borderRadius:
-                  BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 40, height: 4,
+                  width: 40,
+                  height: 4,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(2),
@@ -104,8 +106,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     activeTrackColor: AppColors.energyOrange,
-                    inactiveTrackColor:
-                        Colors.white.withValues(alpha: 0.1),
+                    inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
                     thumbColor: Colors.white,
                     trackHeight: 6,
                   ),
@@ -163,7 +164,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         ),
                         onChanged: (v) {
                           final parsed = int.tryParse(v);
-                          if (parsed != null && parsed >= 1 && parsed <= 30000) {
+                          if (parsed != null &&
+                              parsed >= 1 &&
+                              parsed <= 30000) {
                             setModal(() => tempGoal = parsed);
                           }
                         },
@@ -309,6 +312,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       }
     });
   }
+
   void _loadUserData() {
     final box = Hive.box(AppConstants.userProfileBox);
     final today = _todayKey();
@@ -320,6 +324,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
       _dailyCalories = box.get('daily_calories_$today', defaultValue: 0.0);
     });
   }
+
   void _setupAnimations() {
     _cardController = AnimationController(
       vsync: this,
@@ -358,22 +363,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     return '${now.year}-${now.month}-${now.day}';
   }
 
-void _toggleSession() {
-  HapticFeedback.mediumImpact();
-  if (_sessionStarted) return;
+  void _toggleSession() {
+    HapticFeedback.mediumImpact();
+    if (_sessionStarted) return;
 
-  setState(() => _sessionStarted = true);
+    setState(() => _sessionStarted = true);
 
-  Navigator.of(context).push(
-    AppRouter.slideUp(const ActiveSessionScreen()),
-  ).then((_) {
-    // Retour de la session → reset bouton + reload données
-    if (mounted) {
-      setState(() => _sessionStarted = false);
-      _loadUserData();
-    }
-  });
-}
+    Navigator.of(context)
+        .push(
+      AppRouter.slideUp(const ActiveSessionScreen()),
+    )
+        .then((_) {
+      // Retour de la session → reset bouton + reload données
+      if (mounted) {
+        setState(() => _sessionStarted = false);
+        _loadUserData();
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -462,7 +469,7 @@ void _toggleSession() {
     );
   }
 
- //buildAppBar()
+  //buildAppBar()
 
   Widget _buildBackground() {
     return Stack(
@@ -537,15 +544,37 @@ void _toggleSession() {
 
   String _getDateString() {
     final now = DateTime.now();
-    const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
-    const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+    const days = [
+      'Lundi',
+      'Mardi',
+      'Mercredi',
+      'Jeudi',
+      'Vendredi',
+      'Samedi',
+      'Dimanche'
+    ];
+    const months = [
+      'Jan',
+      'Fév',
+      'Mar',
+      'Avr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Aoû',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Déc'
+    ];
     return '${days[now.weekday - 1]} ${now.day} ${months[now.month - 1]} ${now.year}';
   }
 
   Widget _buildMainProgressCircle(AsyncValue<LiveSessionData> liveSession) {
     final session = liveSession.valueOrNull;
     final totalSteps = _dailySteps + (session?.steps ?? 0);
-    final progress = (_dailyGoal > 0 ? totalSteps / _dailyGoal : 0.0).clamp(0.0, 1.0);
+    final progress =
+        (_dailyGoal > 0 ? totalSteps / _dailyGoal : 0.0).clamp(0.0, 1.0);
     final percent = (progress * 100).toInt();
 
     return Container(
@@ -588,7 +617,8 @@ void _toggleSession() {
                 children: [
                   // Badge pourcentage
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: percent >= 100
                           ? AppColors.successGreen.withValues(alpha: 0.2)
@@ -689,7 +719,9 @@ void _toggleSession() {
               value: progress,
               backgroundColor: Colors.white.withValues(alpha: 0.08),
               valueColor: AlwaysStoppedAnimation<Color>(
-                percent >= 100 ? AppColors.successGreen : AppColors.energyOrange,
+                percent >= 100
+                    ? AppColors.successGreen
+                    : AppColors.energyOrange,
               ),
               minHeight: 6,
             ),
@@ -796,7 +828,9 @@ void _toggleSession() {
                 width: 6,
                 height: 6,
                 decoration: BoxDecoration(
-                  color: _sessionStarted ? AppColors.successGreen : Colors.white.withValues(alpha: 0.2),
+                  color: _sessionStarted
+                      ? AppColors.successGreen
+                      : Colors.white.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -846,6 +880,10 @@ void _toggleSession() {
 
   Widget _buildLiveSessionCard(AsyncValue<LiveSessionData> liveSession) {
     final session = liveSession.valueOrNull;
+    final hrData = ref.watch(heartRateStreamProvider);
+    final bpm = hrData.valueOrNull?.bpm ?? 72;
+    final zone = hrData.valueOrNull?.zone;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -911,6 +949,12 @@ void _toggleSession() {
                 '${session?.speedKmh.toStringAsFixed(1) ?? '0.0'}',
                 'km/h',
               ),
+              _liveDivider(),
+              _liveMetric(
+                '$bpm',
+                'bpm',
+                color: zone?.color ?? Colors.white,
+              ),
             ],
           ),
         ],
@@ -918,16 +962,16 @@ void _toggleSession() {
     );
   }
 
-  Widget _liveMetric(String value, String unit) {
+  Widget _liveMetric(String value, String unit, {Color? color}) {
     return Column(
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: 'Inter',
             fontSize: 22,
             fontWeight: FontWeight.w800,
-            color: Colors.white,
+            color: color ?? Colors.white,
           ),
         ),
         Text(
@@ -1099,12 +1143,17 @@ void _toggleSession() {
             borderRadius: BorderRadius.circular(30),
             gradient: LinearGradient(
               colors: _sessionStarted
-                  ? [AppColors.alertRed, AppColors.alertRed.withValues(alpha: 0.8)]
+                  ? [
+                      AppColors.alertRed,
+                      AppColors.alertRed.withValues(alpha: 0.8)
+                    ]
                   : [AppColors.energyOrange, const Color(0xFFFF9A3C)],
             ),
             boxShadow: [
               BoxShadow(
-                color: (_sessionStarted ? AppColors.alertRed : AppColors.energyOrange)
+                color: (_sessionStarted
+                        ? AppColors.alertRed
+                        : AppColors.energyOrange)
                     .withValues(alpha: 0.5),
                 blurRadius: 20,
                 spreadRadius: 2,
@@ -1116,9 +1165,7 @@ void _toggleSession() {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                _sessionStarted
-                    ? Icons.stop_rounded
-                    : Icons.play_arrow_rounded,
+                _sessionStarted ? Icons.stop_rounded : Icons.play_arrow_rounded,
                 color: Colors.white,
                 size: 26,
               ),
